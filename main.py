@@ -19,9 +19,11 @@ from auth import (
     require_admin, require_api_key, generate_api_key, hash_password
 )
 from excel_export import generate_excel
+from api_v1 import router as api_v1_router
 
 app = FastAPI(title="TimeTracking – Cooperativa Oltre i Sogni")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(api_v1_router)
 templates = Jinja2Templates(directory="templates")
 
 MESI_IT = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
