@@ -16,7 +16,9 @@
       "mcp__timetracking__list_operators",
       "mcp__timetracking__get_monthly_report",
       "Bash(pkill -f \"uvicorn\")",
-      "Bash(curl -s http://localhost:8000/docs)"
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Read(//mnt/c/Users/diego/AppData/Roaming/**)",
+      "Read(//c/Users/diego/.claude/**)"
     ]
   }
 }
