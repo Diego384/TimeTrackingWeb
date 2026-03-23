@@ -5,7 +5,20 @@
       "Bash(dir \"C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\lib\\\\screens\\\\\")",
       "Bash(cmd.exe /c \"dir C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\lib\\\\screens\"\")",
       "Bash(cmd.exe /c 'dir C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\lib /s /b')",
-      "Bash(cmd.exe /c 'git -C C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit status')"
+      "Bash(cmd.exe /c 'git -C C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit status')",
+      "Bash(pip install:*)",
+      "Bash(python -c \"from main import app; print\\(''OK''\\)\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(where uvicorn:*)",
+      "Bash(python -m uvicorn --version)",
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(python -c \"from database import SessionLocal; from models import User, Operator; db = SessionLocal\\(\\); print\\(''Utenti admin:'', db.query\\(User\\).count\\(\\)\\); print\\(''Operatori:'', db.query\\(Operator\\).count\\(\\)\\); [print\\(f''  - {u.username} \\(admin={u.is_admin}\\)''\\) for u in db.query\\(User\\).all\\(\\)]; db.close\\(\\)\")",
+      "mcp__timetracking__list_operators",
+      "mcp__timetracking__get_monthly_report",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Read(//mnt/c/Users/diego/AppData/Roaming/**)",
+      "Read(//c/Users/diego/.claude/**)"
     ]
   }
 }
