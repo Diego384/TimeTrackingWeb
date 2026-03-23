@@ -1,0 +1,388 @@
+from fastapi import FastAPI, Request, Depends, Form, HTTPException, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+from sqlalchemy import extract
+from datetime import datetime, timezone
+import io
+import json
+import calendar
+import qrcode
+from qrcode.image.pure import PyPNGImage
+
+from database import get_db, init_db
+from models import User, Operator, DayEntry, ComuneService
+from schemas import SyncPayload, SyncResponse, OperatorCreate
+from auth import (
+    verify_password, create_session_token, get_current_user,
+    require_admin, require_api_key, generate_api_key, hash_password
+)
+from excel_export import generate_excel
+
+app = FastAPI(title="TimeTracking – Cooperativa Oltre i Sogni")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+MESI_IT = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+           "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
+
+
+@app.on_event("startup")
+def startup():
+    init_db()
+
+
+# ── Helpers template ──────────────────────────────────────────────────────────
+
+def _fmt(v: float) -> str:
+    if v == 0:
+        return "-"
+    return str(int(v)) if v % 1 == 0 else f"{v:.1f}"
+
+
+def _ctx(db: Session, current_user=None, **kwargs):
+    return {"current_user": current_user, "fmt": _fmt, "mesi": MESI_IT, **kwargs}
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=RedirectResponse)
+def root():
+    return RedirectResponse("/dashboard")
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, db: Session = Depends(get_db)):
+    if get_current_user(request, db):
+        return RedirectResponse("/dashboard")
+    return templates.TemplateResponse(request, "login.html", {"error": None})
+
+
+@app.post("/login")
+def login(request: Request, response: Response,
+          username: str = Form(...), password: str = Form(...),
+          db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not verify_password(password, user.hashed_password):
+        return templates.TemplateResponse(request, "login.html",
+                                          {"error": "Credenziali non valide"})
+    token = create_session_token(user.id)
+    resp = RedirectResponse("/dashboard", status_code=302)
+    resp.set_cookie("session", token, httponly=True, max_age=8 * 3600)
+    return resp
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/login", status_code=302)
+    resp.delete_cookie("session")
+    return resp
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    operators = db.query(Operator).order_by(Operator.surname).all()
+    # Ultimi 10 sync
+    recent = (db.query(DayEntry, Operator)
+              .join(Operator)
+              .order_by(DayEntry.synced_at.desc())
+              .limit(10).all())
+    recent_syncs = [{"operator": op, "entry": e} for e, op in recent]
+    return templates.TemplateResponse(request, "dashboard.html",
+                                      _ctx(db, current_user=user, operators=operators, recent_syncs=recent_syncs))
+
+
+# ── Operatori ─────────────────────────────────────────────────────────────────
+
+@app.get("/operators", response_class=HTMLResponse)
+def operators_list(request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    operators = db.query(Operator).order_by(Operator.surname).all()
+    return templates.TemplateResponse(request, "operators.html",
+                                      _ctx(db, current_user=user, operators=operators))
+
+
+@app.post("/operators/create")
+def create_operator(request: Request,
+                    name: str = Form(...), surname: str = Form(...),
+                    cooperative: str = Form("Cooperativa Sociale Oltre i sogni"),
+                    email: str = Form(""),
+                    db: Session = Depends(get_db)):
+    require_admin(request, db)
+    op = Operator(name=name, surname=surname, cooperative=cooperative,
+                  email=email, api_key=generate_api_key())
+    db.add(op)
+    db.commit()
+    return RedirectResponse(f"/operators/{op.id}", status_code=302)
+
+
+@app.get("/operators/{op_id}", response_class=HTMLResponse)
+def operator_detail(op_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404, "Operatore non trovato")
+
+    # Mesi con dati
+    rows = (db.query(extract("year", DayEntry.date).label("y"),
+                     extract("month", DayEntry.date).label("m"))
+            .filter(DayEntry.operator_id == op_id)
+            .distinct().order_by("y", "m").all())
+    months_with_data = [(int(r.y), int(r.m)) for r in rows]
+
+    return templates.TemplateResponse(request, "operator_detail.html",
+                                      _ctx(db, current_user=user, op=op,
+                                           months_with_data=months_with_data))
+
+
+@app.post("/operators/{op_id}/regenerate-key")
+def regenerate_key(op_id: int, request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+    op.api_key = generate_api_key()
+    db.commit()
+    return RedirectResponse(f"/operators/{op_id}", status_code=302)
+
+
+@app.get("/operators/{op_id}/qrcode")
+def operator_qrcode(op_id: int, request: Request, db: Session = Depends(get_db)):
+    """Genera un QR code PNG con URL server + API Key per configurare l'app mobile."""
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+
+    # Usa l'URL base della request come server URL
+    base_url = str(request.base_url).rstrip("/")
+    payload = json.dumps({"url": base_url, "api_key": op.api_key}, ensure_ascii=False)
+
+    img = qrcode.make(payload)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
+
+
+@app.post("/operators/{op_id}/delete")
+def delete_operator(op_id: int, request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if op:
+        db.delete(op)
+        db.commit()
+    return RedirectResponse("/operators", status_code=302)
+
+
+# ── Report mensile ────────────────────────────────────────────────────────────
+
+@app.get("/operators/{op_id}/report/{year}/{month}", response_class=HTMLResponse)
+def monthly_report(op_id: int, year: int, month: int,
+                   request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    all_dates = [datetime(year, month, d).date() for d in range(1, days_in_month + 1)]
+
+    entries_raw = (db.query(DayEntry)
+                   .filter(DayEntry.operator_id == op_id,
+                           extract("year", DayEntry.date) == year,
+                           extract("month", DayEntry.date) == month)
+                   .all())
+    entry_map = {e.date: e for e in entries_raw}
+
+    comuni = (db.query(ComuneService)
+              .filter(ComuneService.operator_id == op_id,
+                      ComuneService.year == year,
+                      ComuneService.month == month)
+              .all())
+
+    # Totali
+    tot = {k: sum(getattr(e, k) for e in entries_raw)
+           for k in ["ore_memofast", "ore_pulmino", "ore_sostituzioni",
+                     "ore_malattia", "ore_legge104"]}
+    # Ferie: separare giornate intere (-1) da ore specifiche
+    tot_ferie_giorni = sum(1 for e in entries_raw if e.ore_ferie == -1.0)
+    tot_ferie_ore    = sum(e.ore_ferie for e in entries_raw if e.ore_ferie > 0)
+    tot["ore_ferie"] = tot_ferie_ore  # solo ore (per calcoli numerici nel template)
+    if tot_ferie_giorni > 0 and tot_ferie_ore > 0:
+        tot["ore_ferie_label"] = f"{tot_ferie_giorni}G + {_fmt(tot_ferie_ore)}h"
+    elif tot_ferie_giorni > 0:
+        tot["ore_ferie_label"] = f"{tot_ferie_giorni} G"
+    elif tot_ferie_ore > 0:
+        tot["ore_ferie_label"] = f"{_fmt(tot_ferie_ore)} h"
+    else:
+        tot["ore_ferie_label"] = "–"
+    # Malattia: sempre giornate
+    tot_malattia_giorni = sum(1 for e in entries_raw if e.ore_malattia > 0)
+    tot["ore_malattia"] = 0.0  # non in ore
+    tot["ore_malattia_label"] = f"{tot_malattia_giorni} G" if tot_malattia_giorni > 0 else "–"
+
+    return templates.TemplateResponse(request, "report.html",
+                                      _ctx(db, current_user=user, op=op, year=year, month=month,
+                                           month_name=MESI_IT[month],
+                                           all_dates=all_dates, entry_map=entry_map,
+                                           comuni=comuni, tot=tot))
+
+
+@app.get("/operators/{op_id}/report/{year}/{month}/excel")
+def download_excel(op_id: int, year: int, month: int,
+                   request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+
+    entries = (db.query(DayEntry)
+               .filter(DayEntry.operator_id == op_id,
+                       extract("year", DayEntry.date) == year,
+                       extract("month", DayEntry.date) == month)
+               .all())
+    comuni = (db.query(ComuneService)
+              .filter(ComuneService.operator_id == op_id,
+                      ComuneService.year == year,
+                      ComuneService.month == month)
+              .all())
+
+    buf = generate_excel(op, year, month, entries, comuni)
+    month_name = MESI_IT[month]
+    filename = f"Report_{op.surname}_{month_name}_{year}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(buf),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+# ── API mobile ────────────────────────────────────────────────────────────────
+
+@app.post("/api/sync", response_model=SyncResponse)
+def api_sync(payload: SyncPayload, request: Request, db: Session = Depends(get_db)):
+    operator = require_api_key(request, db)
+
+    # Aggiorna info operatore
+    operator.name = payload.operator.name
+    operator.surname = payload.operator.surname
+    operator.cooperative = payload.operator.cooperative
+    operator.email = payload.operator.email
+    operator.last_sync = datetime.now(timezone.utc)
+
+    # Upsert day entries
+    for de in payload.day_entries:
+        existing = (db.query(DayEntry)
+                    .filter(DayEntry.operator_id == operator.id,
+                            DayEntry.date == de.date)
+                    .first())
+        if existing:
+            existing.ore_memofast = de.ore_memofast
+            existing.ore_pulmino = de.ore_pulmino
+            existing.ore_sostituzioni = de.ore_sostituzioni
+            existing.ore_ferie = de.ore_ferie
+            existing.ore_malattia = de.ore_malattia
+            existing.ore_legge104 = de.ore_legge104
+            existing.nota = de.nota
+            existing.synced_at = datetime.now(timezone.utc)
+        else:
+            db.add(DayEntry(
+                operator_id=operator.id,
+                date=de.date,
+                ore_memofast=de.ore_memofast,
+                ore_pulmino=de.ore_pulmino,
+                ore_sostituzioni=de.ore_sostituzioni,
+                ore_ferie=de.ore_ferie,
+                ore_malattia=de.ore_malattia,
+                ore_legge104=de.ore_legge104,
+                nota=de.nota,
+            ))
+
+    # Upsert comune services
+    for cs in payload.comune_services:
+        existing = (db.query(ComuneService)
+                    .filter(ComuneService.operator_id == operator.id,
+                            ComuneService.year == payload.year,
+                            ComuneService.month == payload.month,
+                            ComuneService.comune == cs.comune)
+                    .first())
+        if existing:
+            existing.adi = cs.adi
+            existing.ada = cs.ada
+            existing.adh = cs.adh
+            existing.adm = cs.adm
+            existing.asia = cs.asia
+            existing.asia_istituti = cs.asia_istituti
+            existing.cpf = cs.cpf
+            existing.synced_at = datetime.now(timezone.utc)
+        else:
+            db.add(ComuneService(
+                operator_id=operator.id,
+                year=payload.year,
+                month=payload.month,
+                comune=cs.comune,
+                adi=cs.adi, ada=cs.ada, adh=cs.adh, adm=cs.adm,
+                asia=cs.asia, asia_istituti=cs.asia_istituti, cpf=cs.cpf,
+            ))
+
+    db.commit()
+    return SyncResponse(status="ok", operator_id=operator.id,
+                        synced_entries=len(payload.day_entries),
+                        synced_comuni=len(payload.comune_services))
+
+
+@app.get("/api/report/{year}/{month}")
+def api_download_report(year: int, month: int,
+                        request: Request, db: Session = Depends(get_db)):
+    """Scarica il proprio report Excel via API key."""
+    operator = require_api_key(request, db)
+
+    entries = (db.query(DayEntry)
+               .filter(DayEntry.operator_id == operator.id,
+                       extract("year", DayEntry.date) == year,
+                       extract("month", DayEntry.date) == month)
+               .all())
+    comuni = (db.query(ComuneService)
+              .filter(ComuneService.operator_id == operator.id,
+                      ComuneService.year == year,
+                      ComuneService.month == month)
+              .all())
+
+    buf = generate_excel(operator, year, month, entries, comuni)
+    filename = f"Report_{operator.surname}_{MESI_IT[month]}_{year}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(buf),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+# ── Admin: gestione utenti admin ──────────────────────────────────────────────
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    users = db.query(User).all()
+    return templates.TemplateResponse(request, "settings.html",
+                                      _ctx(db, current_user=user, users=users))
+
+
+@app.post("/settings/change-password")
+def change_password(request: Request,
+                    current_password: str = Form(...),
+                    new_password: str = Form(...),
+                    db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    if not verify_password(current_password, user.hashed_password):
+        return templates.TemplateResponse(request, "settings.html",
+                                          _ctx(db, current_user=user,
+                                               users=db.query(User).all(),
+                                               error="Password attuale non corretta"))
+    user.hashed_password = hash_password(new_password)
+    db.commit()
+    return RedirectResponse("/settings?ok=1", status_code=302)

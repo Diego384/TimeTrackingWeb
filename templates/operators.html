@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Operatori{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h4 class="fw-bold mb-0"><i class="bi bi-people me-2 text-primary"></i>Operatori</h4>
+    <p class="text-muted small mb-0">Gestisci gli operatori e le loro API key</p>
+  </div>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalCrea">
+    <i class="bi bi-person-plus me-2"></i>Nuovo operatore
+  </button>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0">
+      <thead class="table-header">
+        <tr>
+          <th class="ps-3">Nome</th>
+          <th>Email</th>
+          <th>API Key</th>
+          <th>Ultimo Sync</th>
+          <th>Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for op in operators %}
+        <tr>
+          <td class="ps-3 fw-semibold">
+            <a href="/operators/{{ op.id }}" class="text-decoration-none">{{ op.full_name }}</a>
+            <div class="text-muted small">{{ op.cooperative }}</div>
+          </td>
+          <td>{{ op.email or "–" }}</td>
+          <td>
+            <div class="d-flex align-items-center gap-2">
+              <code class="badge badge-api px-2 py-1" id="key-{{ op.id }}">
+                {{ op.api_key[:8] }}…{{ op.api_key[-4:] }}
+              </code>
+              <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                      onclick="copyKey('{{ op.api_key }}', {{ op.id }})" title="Copia">
+                <i class="bi bi-clipboard" id="icon-{{ op.id }}"></i>
+              </button>
+            </div>
+          </td>
+          <td>
+            {% if op.last_sync %}
+            <span class="text-success small">
+              <i class="bi bi-check-circle me-1"></i>{{ op.last_sync.strftime('%d/%m/%Y %H:%M') }}
+            </span>
+            {% else %}
+            <span class="text-muted small">Mai sincronizzato</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="/operators/{{ op.id }}" class="btn btn-sm btn-outline-primary me-1">
+              <i class="bi bi-eye"></i>
+            </a>
+            <form method="post" action="/operators/{{ op.id }}/delete" class="d-inline"
+                  onsubmit="return confirm('Eliminare {{ op.full_name }}? Tutti i dati verranno cancellati.')">
+              <button type="submit" class="btn btn-sm btn-outline-danger">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-muted py-5">
+            <i class="bi bi-person-x fs-2 d-block mb-2"></i>
+            Nessun operatore. Creane uno con il pulsante in alto.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal crea operatore -->
+<div class="modal fade" id="modalCrea" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header card-header-blue">
+        <h5 class="modal-title text-white"><i class="bi bi-person-plus me-2"></i>Nuovo Operatore</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="/operators/create">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label fw-semibold">Nome *</label>
+              <input type="text" name="name" class="form-control" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label fw-semibold">Cognome *</label>
+              <input type="text" name="surname" class="form-control" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">Cooperativa</label>
+              <input type="text" name="cooperative" class="form-control"
+                     value="Cooperativa Sociale Oltre i sogni">
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">Email</label>
+              <input type="email" name="email" class="form-control">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-person-plus me-2"></i>Crea operatore
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyKey(key, id) {
+  navigator.clipboard.writeText(key).then(() => {
+    const icon = document.getElementById('icon-' + id);
+    icon.className = 'bi bi-check2 text-success';
+    setTimeout(() => icon.className = 'bi bi-clipboard', 2000);
+  });
+}
+</script>
+{% endblock %}

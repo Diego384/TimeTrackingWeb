@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Impostazioni{% endblock %}
+
+{% block content %}
+<h4 class="fw-bold mb-4"><i class="bi bi-gear me-2 text-primary"></i>Impostazioni</h4>
+
+{% if request.query_params.get('ok') %}
+<div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>Password aggiornata con successo.</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-md-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-header card-header-blue fw-bold">
+        <i class="bi bi-shield-lock me-2"></i>Cambia password
+      </div>
+      <div class="card-body">
+        {% if error %}
+        <div class="alert alert-danger py-2 small">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/settings/change-password">
+          <div class="mb-3">
+            <label class="form-label">Password attuale</label>
+            <input type="password" name="current_password" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Nuova password</label>
+            <input type="password" name="new_password" class="form-control" minlength="8" required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-check2 me-2"></i>Aggiorna password
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-header card-header-blue fw-bold">
+        <i class="bi bi-info-circle me-2"></i>Info API
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Endpoint per l'integrazione con l'app mobile:</p>
+        <ul class="list-unstyled small">
+          <li class="mb-2">
+            <span class="badge bg-success me-2">POST</span>
+            <code>/api/sync</code> – sincronizza dati del mese
+          </li>
+          <li class="mb-2">
+            <span class="badge bg-primary me-2">GET</span>
+            <code>/api/report/{anno}/{mese}</code> – scarica Excel
+          </li>
+        </ul>
+        <p class="small text-muted mb-1">Header richiesto:</p>
+        <code class="small">X-API-Key: &lt;api_key_operatore&gt;</code>
+        <hr>
+        <p class="small text-muted mb-0">
+          Documentazione API disponibile su <a href="/docs" target="_blank">/docs</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

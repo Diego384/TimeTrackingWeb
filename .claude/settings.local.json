@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/c/Users/diego/Documents/CoopOltreiSogniApps/TimeTrackingWebGit/lib/**)",
+      "Bash(dir \"C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\lib\\\\screens\\\\\")",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\lib\\\\screens\"\")",
+      "Bash(cmd.exe /c 'dir C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\lib /s /b')",
+      "Bash(cmd.exe /c 'git -C C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit status')"
+    ]
+  }
+}

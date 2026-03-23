@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Report {{ month_name }} {{ year }} – {{ op.full_name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/operators">Operatori</a></li>
+    <li class="breadcrumb-item"><a href="/operators/{{ op.id }}">{{ op.full_name }}</a></li>
+    <li class="breadcrumb-item active">{{ month_name }} {{ year }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-bold mb-0">
+    <i class="bi bi-calendar-month me-2 text-primary"></i>
+    {{ op.full_name }} – {{ month_name }} {{ year }}
+  </h5>
+  <a href="/operators/{{ op.id }}/report/{{ year }}/{{ month }}/excel"
+     class="btn btn-success">
+    <i class="bi bi-file-earmark-excel me-2"></i>Scarica Excel
+  </a>
+</div>
+
+<!-- Totali -->
+<div class="row g-3 mb-4">
+  {% set ore_lav = tot.ore_memofast + tot.ore_pulmino + tot.ore_sostituzioni %}
+  {% set ore_ass = tot.ore_ferie + tot.ore_malattia + tot.ore_legge104 %}
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header card-header-blue text-white fw-bold small">ORE LAVORATIVE TOTALI</div>
+      <div class="card-body text-center">
+        <div class="display-6 fw-bold text-primary">{{ fmt(ore_lav) }} h</div>
+        <div class="row mt-2 text-center small">
+          <div class="col-4">
+            <div class="fw-bold text-primary">{{ fmt(tot.ore_memofast) }}</div>
+            <div class="text-muted">Memofast</div>
+          </div>
+          <div class="col-4">
+            <div class="fw-bold text-teal">{{ fmt(tot.ore_pulmino) }}</div>
+            <div class="text-muted">Privati</div>
+          </div>
+          <div class="col-4">
+            <div class="fw-bold text-indigo">{{ fmt(tot.ore_sostituzioni) }}</div>
+            <div class="text-muted">Sost.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header card-header-blue text-white fw-bold small">ASSENZE</div>
+      <div class="card-body text-center">
+        <div class="display-6 fw-bold text-warning">{{ fmt(tot.ore_legge104) }} h L.104</div>
+        <div class="row mt-2 text-center small">
+          <div class="col-4">
+            <div class="fw-bold ferie-val">{{ tot.ore_ferie_label }}</div>
+            <div class="text-muted">Ferie</div>
+          </div>
+          <div class="col-4">
+            <div class="fw-bold malattia-val">{{ tot.ore_malattia_label }}</div>
+            <div class="text-muted">Malattia</div>
+          </div>
+          <div class="col-4">
+            <div class="fw-bold legge104-val">{{ fmt(tot.ore_legge104) }}</div>
+            <div class="text-muted">L.104</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tabella giorni -->
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header card-header-blue fw-bold">
+    <i class="bi bi-table me-2"></i>Dettaglio giornaliero
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0" style="font-size:.85rem;">
+        <thead class="table-header text-center">
+          <tr>
+            <th class="text-start ps-2">Giorno</th>
+            <th>Memofast</th>
+            <th>Privati</th>
+            <th>Sost.</th>
+            <th>Ferie</th>
+            <th>Malattia</th>
+            <th>L.104</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in all_dates %}
+          {% set e = entry_map.get(d) %}
+          {% set is_weekend = d.weekday() >= 5 %}
+          <tr class="{% if is_weekend %}weekend{% endif %}">
+            <td class="ps-2 fw-semibold {% if is_weekend %}text-danger{% endif %}">
+              {{ d.strftime('%a %d').title() }}
+            </td>
+            <td class="text-center ore-cell text-primary">{{ fmt(e.ore_memofast) if e else "–" }}</td>
+            <td class="text-center ore-cell" style="color:#00796B">{{ fmt(e.ore_pulmino) if e else "–" }}</td>
+            <td class="text-center ore-cell" style="color:#283593">{{ fmt(e.ore_sostituzioni) if e else "–" }}</td>
+            <td class="text-center ore-cell ferie-val">{% if e and e.ore_ferie == -1 %}G{% elif e and e.ore_ferie > 0 %}{{ fmt(e.ore_ferie) }}{% else %}–{% endif %}</td>
+            <td class="text-center ore-cell malattia-val">{% if e and e.ore_malattia > 0 %}G{% else %}–{% endif %}</td>
+            <td class="text-center ore-cell legge104-val">{{ fmt(e.ore_legge104) if e and e.ore_legge104 > 0 else "–" }}</td>
+            <td class="text-muted small fst-italic">{{ e.nota if e and e.nota else "" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="totale-row text-center">
+            <td class="text-start ps-2 fw-bold">TOTALE ORE</td>
+            <td>{{ fmt(tot.ore_memofast) }}</td>
+            <td>{{ fmt(tot.ore_pulmino) }}</td>
+            <td>{{ fmt(tot.ore_sostituzioni) }}</td>
+            <td class="ferie-val">{{ tot.ore_ferie_label }}</td>
+            <td class="malattia-val">{{ tot.ore_malattia_label }}</td>
+            <td class="legge104-val">{{ fmt(tot.ore_legge104) }}</td>
+            <td></td>
+          </tr>
+          <tr class="complessivo-row text-center">
+            <td colspan="4" class="text-start ps-2 fw-bold">TOTALE COMPLESSIVO MESE</td>
+            <td colspan="4" class="fw-bold">{{ fmt(ore_lav) }} h</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Tabella servizi per comune -->
+{% if comuni %}
+<div class="card shadow-sm border-0">
+  <div class="card-header card-header-blue fw-bold">
+    <i class="bi bi-geo-alt me-2"></i>Servizi per Comune
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0 text-center" style="font-size:.85rem;">
+        <thead class="table-header">
+          <tr>
+            <th class="text-start ps-2">Comune</th>
+            <th>ADI</th><th>ADA</th><th>ADH</th><th>ADM</th>
+            <th>ASIA</th><th>ASIA Ist.</th><th>CPF</th>
+            <th>Totale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cs in comuni %}
+          <tr>
+            <td class="text-start ps-2 fw-semibold">{{ cs.comune }}</td>
+            <td>{{ fmt(cs.adi) }}</td>
+            <td>{{ fmt(cs.ada) }}</td>
+            <td>{{ fmt(cs.adh) }}</td>
+            <td>{{ fmt(cs.adm) }}</td>
+            <td>{{ fmt(cs.asia) }}</td>
+            <td>{{ fmt(cs.asia_istituti) }}</td>
+            <td>{{ fmt(cs.cpf) }}</td>
+            <td class="fw-bold text-primary">{{ fmt(cs.totale) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          {% set tot_adi = comuni|sum(attribute='adi') %}
+          {% set tot_ada = comuni|sum(attribute='ada') %}
+          {% set tot_adh = comuni|sum(attribute='adh') %}
+          {% set tot_adm = comuni|sum(attribute='adm') %}
+          {% set tot_asia = comuni|sum(attribute='asia') %}
+          {% set tot_asiai = comuni|sum(attribute='asia_istituti') %}
+          {% set tot_cpf = comuni|sum(attribute='cpf') %}
+          {% set tot_all = tot_adi + tot_ada + tot_adh + tot_adm + tot_asia + tot_asiai + tot_cpf %}
+          <tr class="totale-row">
+            <td class="text-start ps-2 fw-bold">TOTALE SERVIZIO</td>
+            <td>{{ fmt(tot_adi) }}</td>
+            <td>{{ fmt(tot_ada) }}</td>
+            <td>{{ fmt(tot_adh) }}</td>
+            <td>{{ fmt(tot_adm) }}</td>
+            <td>{{ fmt(tot_asia) }}</td>
+            <td>{{ fmt(tot_asiai) }}</td>
+            <td>{{ fmt(tot_cpf) }}</td>
+            <td class="fw-bold">{{ fmt(tot_all) }}</td>
+          </tr>
+          <tr class="complessivo-row">
+            <td colspan="8" class="text-start ps-2 fw-bold">TOTALE COMPLESSIVO MESE</td>
+            <td class="fw-bold">{{ fmt(tot_all) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
