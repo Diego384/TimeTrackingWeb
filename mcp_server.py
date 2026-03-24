@@ -10,15 +10,24 @@ Configura in %APPDATA%\\Claude\\claude_desktop_config.json:
     "mcpServers": {
       "timetracking": {
         "command": "python",
-        "args": ["C:\\\\Users\\\\diego\\\\Documents\\\\CoopOltreiSogniApps\\\\TimeTrackingWebGit\\\\mcp_server.py"],
+        "args": ["C:\\\\Users\\\\diego\\\\Documents\\\\GitHub\\\\TimeTrackingWeb\\\\mcp_server.py"],
         "env": {
-          "API_BASE_URL": "http://localhost:8000",
+          "API_BASE_URL": "http://217.154.2.219:8080",
           "API_USERNAME": "admin",
-          "API_PASSWORD": "ChangeMe123!"
+          "API_PASSWORD": "admin123"
         }
       }
     }
   }
+
+Strumenti disponibili:
+  - list_operators            : lista tutti gli operatori
+  - get_operator_detail       : dettaglio operatore + mesi con dati
+  - get_monthly_report        : report mensile (ore, comuni, totali)
+  - create_operator           : crea un nuovo operatore
+  - update_operator           : modifica dati anagrafici operatore
+  - upsert_operator_entries   : inserisce/aggiorna ore giornaliere e servizi per comune
+  - download_excel_report     : scarica il report .xlsx mensile
 """
 
 import os
@@ -193,6 +202,61 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="upsert_operator_entries",
+            description=(
+                "Inserisce o aggiorna le ore giornaliere e i servizi per comune di un operatore "
+                "per un dato mese. I campi delle giornate sono: ore_memofast, ore_pulmino, "
+                "ore_sostituzioni, ore_ferie (-1 = giornata intera, >0 = ore), ore_malattia, "
+                "ore_legge104, nota. I servizi per comune hanno: comune, adi, ada, adh, adm, "
+                "asia, asia_istituti, cpf."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "operator_id": {"type": "integer", "description": "ID dell'operatore"},
+                    "year": {"type": "integer", "description": "Anno (es. 2025)"},
+                    "month": {"type": "integer", "description": "Mese 1-12"},
+                    "day_entries": {
+                        "type": "array",
+                        "description": "Lista di giornate da inserire/aggiornare",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {"type": "string", "description": "Data in formato YYYY-MM-DD"},
+                                "ore_memofast": {"type": "number", "default": 0},
+                                "ore_pulmino": {"type": "number", "default": 0},
+                                "ore_sostituzioni": {"type": "number", "default": 0},
+                                "ore_ferie": {"type": "number", "default": 0, "description": "-1 = giornata intera, >0 = ore"},
+                                "ore_malattia": {"type": "number", "default": 0},
+                                "ore_legge104": {"type": "number", "default": 0},
+                                "nota": {"type": "string", "default": ""},
+                            },
+                            "required": ["date"],
+                        },
+                    },
+                    "comune_services": {
+                        "type": "array",
+                        "description": "Lista di servizi per comune da inserire/aggiornare",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "comune": {"type": "string", "description": "Nome del comune"},
+                                "adi": {"type": "number", "default": 0},
+                                "ada": {"type": "number", "default": 0},
+                                "adh": {"type": "number", "default": 0},
+                                "adm": {"type": "number", "default": 0},
+                                "asia": {"type": "number", "default": 0},
+                                "asia_istituti": {"type": "number", "default": 0},
+                                "cpf": {"type": "number", "default": 0},
+                            },
+                            "required": ["comune"],
+                        },
+                    },
+                },
+                "required": ["operator_id", "year", "month"],
+            },
+        ),
+        types.Tool(
             name="download_excel_report",
             description="Genera il report Excel mensile di un operatore e lo salva localmente.",
             inputSchema={
@@ -332,6 +396,23 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 lines.append(f"  {c['comune']}: {', '.join(parts) if parts else '-'}")
 
         return [types.TextContent(type="text", text="\n".join(lines))]
+
+    elif name == "upsert_operator_entries":
+        op_id = arguments["operator_id"]
+        body = {
+            "year": arguments["year"],
+            "month": arguments["month"],
+            "day_entries": arguments.get("day_entries", []),
+            "comune_services": arguments.get("comune_services", []),
+        }
+        data = await _api_put(f"/api/v1/operators/{op_id}/entries", body)
+        text = (
+            f"Dati aggiornati con successo per operatore ID {op_id} "
+            f"({arguments['month']}/{arguments['year']}):\n"
+            f"  Giornate inserite/aggiornate: {data.get('upserted_entries', 0)}\n"
+            f"  Comuni inseriti/aggiornati:   {data.get('upserted_comuni', 0)}"
+        )
+        return [types.TextContent(type="text", text=text)]
 
     elif name == "download_excel_report":
         op_id = arguments["operator_id"]
