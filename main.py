@@ -12,8 +12,8 @@ import qrcode
 from qrcode.image.pure import PyPNGImage
 
 from database import get_db, init_db
-from models import User, Operator, DayEntry, ComuneService
-from schemas import SyncPayload, SyncResponse, OperatorCreate
+from models import User, Operator, DayEntry, ComuneService, ContractHours
+from schemas import SyncPayload, SyncResponse, OperatorCreate, ContractHoursIn
 from auth import (
     verify_password, create_session_token, get_current_user,
     require_admin, require_api_key, generate_api_key, hash_password
@@ -138,7 +138,8 @@ def operator_detail(op_id: int, request: Request, db: Session = Depends(get_db))
 
     return templates.TemplateResponse(request, "operator_detail.html",
                                       _ctx(db, current_user=user, op=op,
-                                           months_with_data=months_with_data))
+                                           months_with_data=months_with_data,
+                                           contract_hours=op.contract_hours))
 
 
 @app.post("/operators/{op_id}/regenerate-key")
@@ -179,6 +180,38 @@ def delete_operator(op_id: int, request: Request, db: Session = Depends(get_db))
         db.delete(op)
         db.commit()
     return RedirectResponse("/operators", status_code=302)
+
+
+@app.post("/operators/{op_id}/contract-hours")
+def save_contract_hours(
+    op_id: int, request: Request,
+    lunedi: float = Form(0), martedi: float = Form(0),
+    mercoledi: float = Form(0), giovedi: float = Form(0),
+    venerdi: float = Form(0), sabato: float = Form(0),
+    domenica: float = Form(0),
+    db: Session = Depends(get_db),
+):
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404, "Operatore non trovato")
+    ch = db.query(ContractHours).filter(ContractHours.operator_id == op_id).first()
+    if ch:
+        ch.lunedi = lunedi
+        ch.martedi = martedi
+        ch.mercoledi = mercoledi
+        ch.giovedi = giovedi
+        ch.venerdi = venerdi
+        ch.sabato = sabato
+        ch.domenica = domenica
+    else:
+        db.add(ContractHours(
+            operator_id=op_id,
+            lunedi=lunedi, martedi=martedi, mercoledi=mercoledi,
+            giovedi=giovedi, venerdi=venerdi, sabato=sabato, domenica=domenica,
+        ))
+    db.commit()
+    return RedirectResponse(f"/operators/{op_id}", status_code=302)
 
 
 # ── Report mensile ────────────────────────────────────────────────────────────
@@ -362,6 +395,31 @@ def api_download_report(year: int, month: int,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@app.get("/api/contract-hours")
+def api_get_contract_hours(request: Request, db: Session = Depends(get_db)):
+    """Restituisce le ore ordinarie contrattuali dell'operatore via API key (uso mobile)."""
+    operator = require_api_key(request, db)
+    ch = db.query(ContractHours).filter(ContractHours.operator_id == operator.id).first()
+    if not ch:
+        return {
+            "operator_id": operator.id,
+            "lunedi": 0, "martedi": 0, "mercoledi": 0,
+            "giovedi": 0, "venerdi": 0, "sabato": 0, "domenica": 0,
+            "updated_at": None,
+        }
+    return {
+        "operator_id": operator.id,
+        "lunedi": ch.lunedi,
+        "martedi": ch.martedi,
+        "mercoledi": ch.mercoledi,
+        "giovedi": ch.giovedi,
+        "venerdi": ch.venerdi,
+        "sabato": ch.sabato,
+        "domenica": ch.domenica,
+        "updated_at": ch.updated_at,
+    }
 
 
 # ── Admin: gestione utenti admin ──────────────────────────────────────────────

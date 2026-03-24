@@ -138,3 +138,22 @@ class OperatorDataUpsert(BaseModel):
     month: int = Field(ge=1, le=12)
     day_entries: list[DayEntryIn] = []
     comune_services: list[ComuneServiceIn] = []
+
+
+# ── Ore ordinarie contrattuali ────────────────────────────────────────────────
+
+class ContractHoursIn(BaseModel):
+    lunedi: float = Field(default=0, ge=0, le=24)
+    martedi: float = Field(default=0, ge=0, le=24)
+    mercoledi: float = Field(default=0, ge=0, le=24)
+    giovedi: float = Field(default=0, ge=0, le=24)
+    venerdi: float = Field(default=0, ge=0, le=24)
+    sabato: float = Field(default=0, ge=0, le=24)
+    domenica: float = Field(default=0, ge=0, le=24)
+
+
+class ContractHoursOut(ContractHoursIn):
+    operator_id: int
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
