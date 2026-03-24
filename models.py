@@ -28,6 +28,7 @@ class Operator(Base):
 
     day_entries = relationship("DayEntry", back_populates="operator", cascade="all, delete-orphan")
     comune_services = relationship("ComuneService", back_populates="operator", cascade="all, delete-orphan")
+    contract_hours = relationship("ContractHours", back_populates="operator", uselist=False, cascade="all, delete-orphan")
 
     @property
     def full_name(self):
@@ -82,3 +83,22 @@ class ComuneService(Base):
     @property
     def totale(self):
         return self.adi + self.ada + self.adh + self.adm + self.asia + self.asia_istituti + self.cpf
+
+
+class ContractHours(Base):
+    """Ore ordinarie giornaliere stabilite da contratto per ogni giorno della settimana."""
+    __tablename__ = "contract_hours"
+
+    id = Column(Integer, primary_key=True, index=True)
+    operator_id = Column(Integer, ForeignKey("operators.id"), unique=True, nullable=False)
+    lunedi = Column(Float, default=0)
+    martedi = Column(Float, default=0)
+    mercoledi = Column(Float, default=0)
+    giovedi = Column(Float, default=0)
+    venerdi = Column(Float, default=0)
+    sabato = Column(Float, default=0)
+    domenica = Column(Float, default=0)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    operator = relationship("Operator", back_populates="contract_hours")

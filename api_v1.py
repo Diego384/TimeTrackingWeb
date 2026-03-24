@@ -8,13 +8,14 @@ import calendar
 import io
 
 from database import get_db
-from models import User, Operator, DayEntry, ComuneService
+from models import User, Operator, DayEntry, ComuneService, ContractHours
 from auth import verify_password, create_access_token, get_current_user_jwt, generate_api_key
 from excel_export import generate_excel
 from schemas import (
     TokenResponse, OperatorOut, OperatorDetailOut,
     DayEntryOut, ComuneServiceOut, MonthlyReportOut, ReportTotals,
     OperatorCreate, OperatorUpdate, OperatorDataUpsert,
+    ContractHoursIn, ContractHoursOut,
 )
 
 MESI_IT = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
@@ -279,3 +280,57 @@ def upsert_operator_entries(
         "upserted_entries": len(body.day_entries),
         "upserted_comuni": len(body.comune_services),
     }
+
+
+# ── Ore ordinarie contrattuali ────────────────────────────────────────────────
+
+@router.get("/operators/{op_id}/contract-hours", response_model=ContractHoursOut)
+def get_contract_hours(
+    op_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_jwt),
+):
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404, "Operatore non trovato")
+    ch = db.query(ContractHours).filter(ContractHours.operator_id == op_id).first()
+    if not ch:
+        # Restituisce valori di default se non ancora impostati
+        return ContractHoursOut(operator_id=op_id)
+    return ContractHoursOut.model_validate(ch)
+
+
+@router.put("/operators/{op_id}/contract-hours", response_model=ContractHoursOut)
+def upsert_contract_hours(
+    op_id: int,
+    body: ContractHoursIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_jwt),
+):
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404, "Operatore non trovato")
+    ch = db.query(ContractHours).filter(ContractHours.operator_id == op_id).first()
+    if ch:
+        ch.lunedi = body.lunedi
+        ch.martedi = body.martedi
+        ch.mercoledi = body.mercoledi
+        ch.giovedi = body.giovedi
+        ch.venerdi = body.venerdi
+        ch.sabato = body.sabato
+        ch.domenica = body.domenica
+    else:
+        ch = ContractHours(
+            operator_id=op_id,
+            lunedi=body.lunedi,
+            martedi=body.martedi,
+            mercoledi=body.mercoledi,
+            giovedi=body.giovedi,
+            venerdi=body.venerdi,
+            sabato=body.sabato,
+            domenica=body.domenica,
+        )
+        db.add(ch)
+    db.commit()
+    db.refresh(ch)
+    return ContractHoursOut.model_validate(ch)

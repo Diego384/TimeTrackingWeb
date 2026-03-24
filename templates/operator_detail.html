@@ -101,8 +101,46 @@
     </form>
   </div>
 
-  <!-- Mesi con dati -->
+  <!-- Ore ordinarie contrattuali + Mesi con dati -->
   <div class="col-lg-8">
+    <!-- Ore ordinarie contrattuali -->
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-header card-header-blue">
+        <i class="bi bi-clock me-2"></i>Ore ordinarie contrattuali
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">Imposta le ore ordinarie giornaliere previste dal contratto per ogni giorno della settimana.</p>
+        <form method="post" action="/operators/{{ op.id }}/contract-hours">
+          <div class="row g-2">
+            {% set giorni = [
+              ("lunedi",    "Lunedì"),
+              ("martedi",   "Martedì"),
+              ("mercoledi", "Mercoledì"),
+              ("giovedi",   "Giovedì"),
+              ("venerdi",   "Venerdì"),
+              ("sabato",    "Sabato"),
+              ("domenica",  "Domenica"),
+            ] %}
+            {% for campo, etichetta in giorni %}
+            <div class="col-sm-6 col-md-4 col-lg-3">
+              <label class="form-label small fw-semibold mb-1">{{ etichetta }}</label>
+              <div class="input-group input-group-sm">
+                <input type="number" class="form-control" name="{{ campo }}"
+                       min="0" max="24" step="0.5"
+                       value="{{ contract_hours[campo] if contract_hours else 0 }}">
+                <span class="input-group-text">h</span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="mt-3">
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i class="bi bi-save me-1"></i>Salva ore contrattuali
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
     <div class="card shadow-sm border-0">
       <div class="card-header card-header-blue">
         <i class="bi bi-calendar3 me-2"></i>Report mensili
