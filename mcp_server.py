@@ -257,6 +257,35 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_contract_hours",
+            description="Restituisce le ore ordinarie contrattuali di un operatore per ogni giorno della settimana.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "operator_id": {"type": "integer", "description": "ID dell'operatore"},
+                },
+                "required": ["operator_id"],
+            },
+        ),
+        types.Tool(
+            name="set_contract_hours",
+            description="Imposta le ore ordinarie contrattuali di un operatore per ogni giorno della settimana.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "operator_id": {"type": "integer", "description": "ID dell'operatore"},
+                    "lunedi":    {"type": "number", "default": 0, "description": "Ore lunedì (0-24)"},
+                    "martedi":   {"type": "number", "default": 0, "description": "Ore martedì (0-24)"},
+                    "mercoledi": {"type": "number", "default": 0, "description": "Ore mercoledì (0-24)"},
+                    "giovedi":   {"type": "number", "default": 0, "description": "Ore giovedì (0-24)"},
+                    "venerdi":   {"type": "number", "default": 0, "description": "Ore venerdì (0-24)"},
+                    "sabato":    {"type": "number", "default": 0, "description": "Ore sabato (0-24)"},
+                    "domenica":  {"type": "number", "default": 0, "description": "Ore domenica (0-24)"},
+                },
+                "required": ["operator_id"],
+            },
+        ),
+        types.Tool(
             name="download_excel_report",
             description="Genera il report Excel mensile di un operatore e lo salva localmente.",
             inputSchema={
@@ -413,6 +442,27 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             f"  Comuni inseriti/aggiornati:   {data.get('upserted_comuni', 0)}"
         )
         return [types.TextContent(type="text", text=text)]
+
+    elif name == "get_contract_hours":
+        op_id = arguments["operator_id"]
+        data = await _api_get(f"/api/v1/operators/{op_id}/contract-hours")
+        giorni = ["lunedi", "martedi", "mercoledi", "giovedi", "venerdi", "sabato", "domenica"]
+        nomi   = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+        lines = [f"Ore contrattuali operatore ID {op_id}:"]
+        for g, n in zip(giorni, nomi):
+            lines.append(f"  {n}: {data.get(g, 0)}h")
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
+    elif name == "set_contract_hours":
+        op_id = arguments["operator_id"]
+        giorni = ["lunedi", "martedi", "mercoledi", "giovedi", "venerdi", "sabato", "domenica"]
+        body = {g: arguments.get(g, 0) for g in giorni}
+        data = await _api_put(f"/api/v1/operators/{op_id}/contract-hours", body)
+        nomi = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+        lines = [f"Ore contrattuali aggiornate per operatore ID {op_id}:"]
+        for g, n in zip(giorni, nomi):
+            lines.append(f"  {n}: {data.get(g, 0)}h")
+        return [types.TextContent(type="text", text="\n".join(lines))]
 
     elif name == "download_excel_report":
         op_id = arguments["operator_id"]
