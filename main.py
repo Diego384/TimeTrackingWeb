@@ -7,6 +7,7 @@ from sqlalchemy import extract
 from datetime import datetime, timezone
 import io
 import json
+import os
 import calendar
 import qrcode
 from qrcode.image.pure import PyPNGImage
@@ -161,8 +162,8 @@ def operator_qrcode(op_id: int, request: Request, db: Session = Depends(get_db))
     if not op:
         raise HTTPException(404)
 
-    # Usa l'URL base della request come server URL
-    base_url = str(request.base_url).rstrip("/")
+    # Usa PUBLIC_BASE_URL se configurato (es. http://1.2.3.4:8080), altrimenti request.base_url
+    base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
     payload = json.dumps({"url": base_url, "api_key": op.api_key}, ensure_ascii=False)
 
     img = qrcode.make(payload)
