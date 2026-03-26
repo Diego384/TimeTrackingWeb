@@ -29,6 +29,7 @@ class Operator(Base):
     day_entries = relationship("DayEntry", back_populates="operator", cascade="all, delete-orphan")
     comune_services = relationship("ComuneService", back_populates="operator", cascade="all, delete-orphan")
     contract_hours = relationship("ContractHours", back_populates="operator", uselist=False, cascade="all, delete-orphan")
+    files = relationship("OperatorFile", back_populates="operator", cascade="all, delete-orphan")
 
     @property
     def full_name(self):
@@ -102,3 +103,20 @@ class ContractHours(Base):
                         onupdate=lambda: datetime.now(timezone.utc))
 
     operator = relationship("Operator", back_populates="contract_hours")
+
+
+class OperatorFile(Base):
+    """File caricato da operatore o admin (PDF, foto, Excel, ecc.)."""
+    __tablename__ = "operator_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    operator_id = Column(Integer, ForeignKey("operators.id"), nullable=False)
+    filename = Column(String, nullable=False)          # nome originale
+    stored_name = Column(String, nullable=False)       # nome salvato su disco
+    mime_type = Column(String, default="")
+    file_size = Column(Integer, default=0)             # byte
+    uploaded_by = Column(String, default="operator")   # "operator" | "admin"
+    description = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    operator = relationship("Operator", back_populates="files")

@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, Depends, Form, HTTPException, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, Request, Depends, Form, HTTPException, Response, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -8,12 +8,17 @@ from datetime import datetime, timezone
 import io
 import json
 import os
+import uuid
 import calendar
 import qrcode
+from pathlib import Path
 from qrcode.image.pure import PyPNGImage
 
 from database import get_db, init_db
-from models import User, Operator, DayEntry, ComuneService, ContractHours
+from models import User, Operator, DayEntry, ComuneService, ContractHours, OperatorFile
+
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 from schemas import SyncPayload, SyncResponse, OperatorCreate, ContractHoursIn
 from auth import (
     verify_password, create_session_token, get_current_user,
@@ -447,3 +452,180 @@ def change_password(request: Request,
     user.hashed_password = hash_password(new_password)
     db.commit()
     return RedirectResponse("/settings?ok=1", status_code=302)
+
+
+# ── API mobile: file upload/download ──────────────────────────────────────────
+
+def _file_json(f: OperatorFile) -> dict:
+    return {
+        "id": f.id,
+        "filename": f.filename,
+        "mime_type": f.mime_type,
+        "file_size": f.file_size,
+        "uploaded_by": f.uploaded_by,
+        "description": f.description,
+        "created_at": f.created_at.isoformat() if f.created_at else None,
+    }
+
+
+@app.get("/api/files")
+def api_list_files(request: Request, db: Session = Depends(get_db)):
+    """Lista file dell'operatore (mobile)."""
+    operator = require_api_key(request, db)
+    files = (db.query(OperatorFile)
+             .filter(OperatorFile.operator_id == operator.id)
+             .order_by(OperatorFile.created_at.desc())
+             .all())
+    return [_file_json(f) for f in files]
+
+
+@app.post("/api/files/upload")
+async def api_upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Carica un file dal dispositivo mobile."""
+    operator = require_api_key(request, db)
+    content = await file.read()
+    ext = Path(file.filename or "file").suffix
+    stored_name = f"{uuid.uuid4().hex}{ext}"
+    (UPLOAD_DIR / stored_name).write_bytes(content)
+    op_file = OperatorFile(
+        operator_id=operator.id,
+        filename=file.filename or stored_name,
+        stored_name=stored_name,
+        mime_type=file.content_type or "",
+        file_size=len(content),
+        uploaded_by="operator",
+        description=description,
+    )
+    db.add(op_file)
+    db.commit()
+    db.refresh(op_file)
+    return _file_json(op_file)
+
+
+@app.get("/api/files/{file_id}/download")
+def api_download_file(file_id: int, request: Request, db: Session = Depends(get_db)):
+    """Scarica un file (mobile)."""
+    operator = require_api_key(request, db)
+    f = db.query(OperatorFile).filter(
+        OperatorFile.id == file_id,
+        OperatorFile.operator_id == operator.id,
+    ).first()
+    if not f:
+        raise HTTPException(404, "File non trovato")
+    path = UPLOAD_DIR / f.stored_name
+    if not path.exists():
+        raise HTTPException(404, "File non presente sul server")
+    return FileResponse(
+        str(path),
+        media_type=f.mime_type or "application/octet-stream",
+        filename=f.filename,
+    )
+
+
+@app.delete("/api/files/{file_id}")
+def api_delete_file(file_id: int, request: Request, db: Session = Depends(get_db)):
+    """Elimina un file (mobile, solo quelli caricati dall'operatore)."""
+    operator = require_api_key(request, db)
+    f = db.query(OperatorFile).filter(
+        OperatorFile.id == file_id,
+        OperatorFile.operator_id == operator.id,
+    ).first()
+    if not f:
+        raise HTTPException(404, "File non trovato")
+    if f.uploaded_by != "operator":
+        raise HTTPException(403, "Non puoi eliminare file caricati dall'admin")
+    path = UPLOAD_DIR / f.stored_name
+    if path.exists():
+        path.unlink()
+    db.delete(f)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ── Admin web: gestione file operatore ────────────────────────────────────────
+
+@app.get("/operators/{op_id}/files", response_class=HTMLResponse)
+def admin_files_list(op_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+    files = (db.query(OperatorFile)
+             .filter(OperatorFile.operator_id == op_id)
+             .order_by(OperatorFile.created_at.desc())
+             .all())
+    return templates.TemplateResponse(request, "operator_files.html",
+                                      _ctx(db, current_user=user, op=op, files=files))
+
+
+@app.post("/operators/{op_id}/files/upload")
+async def admin_upload_file(
+    op_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+    content = await file.read()
+    ext = Path(file.filename or "file").suffix
+    stored_name = f"{uuid.uuid4().hex}{ext}"
+    (UPLOAD_DIR / stored_name).write_bytes(content)
+    op_file = OperatorFile(
+        operator_id=op_id,
+        filename=file.filename or stored_name,
+        stored_name=stored_name,
+        mime_type=file.content_type or "",
+        file_size=len(content),
+        uploaded_by="admin",
+        description=description,
+    )
+    db.add(op_file)
+    db.commit()
+    return RedirectResponse(f"/operators/{op_id}/files", status_code=302)
+
+
+@app.get("/operators/{op_id}/files/{file_id}/download")
+def admin_download_file(op_id: int, file_id: int, request: Request,
+                        db: Session = Depends(get_db)):
+    require_admin(request, db)
+    f = db.query(OperatorFile).filter(
+        OperatorFile.id == file_id,
+        OperatorFile.operator_id == op_id,
+    ).first()
+    if not f:
+        raise HTTPException(404)
+    path = UPLOAD_DIR / f.stored_name
+    if not path.exists():
+        raise HTTPException(404, "File non presente sul server")
+    return FileResponse(
+        str(path),
+        media_type=f.mime_type or "application/octet-stream",
+        filename=f.filename,
+    )
+
+
+@app.post("/operators/{op_id}/files/{file_id}/delete")
+def admin_delete_file(op_id: int, file_id: int, request: Request,
+                      db: Session = Depends(get_db)):
+    require_admin(request, db)
+    f = db.query(OperatorFile).filter(
+        OperatorFile.id == file_id,
+        OperatorFile.operator_id == op_id,
+    ).first()
+    if not f:
+        raise HTTPException(404)
+    path = UPLOAD_DIR / f.stored_name
+    if path.exists():
+        path.unlink()
+    db.delete(f)
+    db.commit()
+    return RedirectResponse(f"/operators/{op_id}/files", status_code=302)
