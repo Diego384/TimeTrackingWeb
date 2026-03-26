@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_type
 import io
 import json
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 from qrcode.image.pure import PyPNGImage
 
 from database import get_db, init_db
-from models import User, Operator, DayEntry, ComuneService, ContractHours, OperatorFile
+from models import User, Operator, DayEntry, ComuneService, ContractHours, OperatorFile, WeeklySchedule, WeeklyScheduleEntry
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -25,6 +25,7 @@ from auth import (
     require_admin, require_api_key, generate_api_key, hash_password
 )
 from excel_export import generate_excel
+from schedule_excel import generate_schedule_excel
 from api_v1 import router as api_v1_router
 
 app = FastAPI(title="TimeTracking – Cooperativa Oltre i Sogni")
@@ -629,3 +630,251 @@ def admin_delete_file(op_id: int, file_id: int, request: Request,
     db.delete(f)
     db.commit()
     return RedirectResponse(f"/operators/{op_id}/files", status_code=302)
+
+
+# ── API mobile: griglia oraria settimanale ─────────────────────────────────────
+
+def _schedule_entry_json(e: WeeklyScheduleEntry) -> dict:
+    return {
+        "id": e.id,
+        "day_of_week": e.day_of_week,
+        "row_index": e.row_index,
+        "ora_inizio": e.ora_inizio,
+        "ora_fine": e.ora_fine,
+        "ore": e.ore,
+        "utente_assistito": e.utente_assistito,
+        "servizio": e.servizio,
+        "comune": e.comune,
+    }
+
+
+@app.post("/api/weekly-schedule")
+def api_upsert_weekly_schedule(request: Request, body: dict,
+                                db: Session = Depends(get_db)):
+    """Upsert griglia oraria settimanale (mobile)."""
+    operator = require_api_key(request, db)
+
+    week_start_str = body.get("week_start")
+    if not week_start_str:
+        raise HTTPException(400, "week_start obbligatorio")
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        raise HTTPException(400, "week_start non valido (usa YYYY-MM-DD)")
+
+    periodo = body.get("periodo_riferimento", "")
+    entries_data = body.get("entries", [])
+
+    # Upsert schedule
+    schedule = (db.query(WeeklySchedule)
+                .filter(WeeklySchedule.operator_id == operator.id,
+                        WeeklySchedule.week_start == week_start)
+                .first())
+    if schedule:
+        schedule.periodo_riferimento = periodo
+        schedule.updated_at = datetime.now(timezone.utc)
+        # Elimina entries esistenti
+        db.query(WeeklyScheduleEntry).filter(
+            WeeklyScheduleEntry.schedule_id == schedule.id
+        ).delete()
+    else:
+        schedule = WeeklySchedule(
+            operator_id=operator.id,
+            week_start=week_start,
+            periodo_riferimento=periodo,
+        )
+        db.add(schedule)
+        db.flush()
+
+    # Inserisce nuove entries
+    for ed in entries_data:
+        db.add(WeeklyScheduleEntry(
+            schedule_id=schedule.id,
+            day_of_week=ed.get("day_of_week", 1),
+            row_index=ed.get("row_index", 0),
+            ora_inizio=ed.get("ora_inizio", ""),
+            ora_fine=ed.get("ora_fine", ""),
+            ore=ed.get("ore", 0.0),
+            utente_assistito=ed.get("utente_assistito", ""),
+            servizio=ed.get("servizio", ""),
+            comune=ed.get("comune", ""),
+        ))
+
+    db.commit()
+    db.refresh(schedule)
+    return {"status": "ok", "id": schedule.id, "week_start": str(week_start)}
+
+
+@app.get("/api/weekly-schedule")
+def api_list_weekly_schedules(request: Request, db: Session = Depends(get_db)):
+    """Lista griglie orarie dell'operatore (mobile)."""
+    operator = require_api_key(request, db)
+    schedules = (db.query(WeeklySchedule)
+                 .filter(WeeklySchedule.operator_id == operator.id)
+                 .order_by(WeeklySchedule.week_start.desc())
+                 .all())
+    return [
+        {
+            "id": s.id,
+            "week_start": str(s.week_start),
+            "periodo_riferimento": s.periodo_riferimento,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+            "entry_count": len(s.entries),
+        }
+        for s in schedules
+    ]
+
+
+@app.get("/api/weekly-schedule/{week_start_str}")
+def api_get_weekly_schedule(week_start_str: str, request: Request,
+                             db: Session = Depends(get_db)):
+    """Restituisce griglia oraria per una settimana (mobile)."""
+    operator = require_api_key(request, db)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        raise HTTPException(400, "week_start non valido (usa YYYY-MM-DD)")
+
+    schedule = (db.query(WeeklySchedule)
+                .filter(WeeklySchedule.operator_id == operator.id,
+                        WeeklySchedule.week_start == week_start)
+                .first())
+    if not schedule:
+        raise HTTPException(404, "Griglia non trovata")
+
+    return {
+        "id": schedule.id,
+        "week_start": str(schedule.week_start),
+        "periodo_riferimento": schedule.periodo_riferimento,
+        "updated_at": schedule.updated_at.isoformat() if schedule.updated_at else None,
+        "entries": [_schedule_entry_json(e) for e in schedule.entries],
+    }
+
+
+@app.delete("/api/weekly-schedule/{week_start_str}")
+def api_delete_weekly_schedule(week_start_str: str, request: Request,
+                                db: Session = Depends(get_db)):
+    """Elimina griglia oraria per una settimana (mobile)."""
+    operator = require_api_key(request, db)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        raise HTTPException(400, "week_start non valido (usa YYYY-MM-DD)")
+
+    schedule = (db.query(WeeklySchedule)
+                .filter(WeeklySchedule.operator_id == operator.id,
+                        WeeklySchedule.week_start == week_start)
+                .first())
+    if not schedule:
+        raise HTTPException(404, "Griglia non trovata")
+    db.delete(schedule)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ── Admin web: griglie orarie operatore ───────────────────────────────────────
+
+@app.get("/operators/{op_id}/schedules", response_class=HTMLResponse)
+def admin_schedules_list(op_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404, "Operatore non trovato")
+    schedules = (db.query(WeeklySchedule)
+                 .filter(WeeklySchedule.operator_id == op_id)
+                 .order_by(WeeklySchedule.week_start.desc())
+                 .all())
+    return templates.TemplateResponse(request, "operator_schedules.html",
+                                      _ctx(db, current_user=user, op=op, schedules=schedules))
+
+
+@app.get("/operators/{op_id}/schedules/{week_start_str}", response_class=HTMLResponse)
+def admin_schedule_detail(op_id: int, week_start_str: str,
+                          request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        raise HTTPException(400, "Data non valida")
+
+    schedule = (db.query(WeeklySchedule)
+                .filter(WeeklySchedule.operator_id == op_id,
+                        WeeklySchedule.week_start == week_start)
+                .first())
+    if not schedule:
+        raise HTTPException(404, "Griglia non trovata")
+
+    # Raggruppa entries per giorno
+    entries_by_day = {}
+    for e in schedule.entries:
+        entries_by_day.setdefault(e.day_of_week, []).append(e)
+
+    # Totali per giorno e settimana
+    totali_giorno = {dow: sum(e.ore for e in lst)
+                     for dow, lst in entries_by_day.items()}
+    totale_settimana = sum(totali_giorno.values())
+
+    giorni_nomi = {1: "Lunedì", 2: "Martedì", 3: "Mercoledì",
+                   4: "Giovedì", 5: "Venerdì", 6: "Sabato"}
+
+    return templates.TemplateResponse(request, "operator_schedule_detail.html",
+                                      _ctx(db, current_user=user, op=op,
+                                           schedule=schedule,
+                                           entries_by_day=entries_by_day,
+                                           totali_giorno=totali_giorno,
+                                           totale_settimana=totale_settimana,
+                                           giorni_nomi=giorni_nomi))
+
+
+@app.post("/operators/{op_id}/schedules/{week_start_str}/delete")
+def admin_delete_schedule(op_id: int, week_start_str: str,
+                          request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        raise HTTPException(400, "Data non valida")
+
+    schedule = (db.query(WeeklySchedule)
+                .filter(WeeklySchedule.operator_id == op_id,
+                        WeeklySchedule.week_start == week_start)
+                .first())
+    if schedule:
+        db.delete(schedule)
+        db.commit()
+    return RedirectResponse(f"/operators/{op_id}/schedules", status_code=302)
+
+
+@app.get("/operators/{op_id}/schedules/{week_start_str}/excel")
+def admin_schedule_excel(op_id: int, week_start_str: str,
+                         request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    op = db.query(Operator).filter(Operator.id == op_id).first()
+    if not op:
+        raise HTTPException(404)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        raise HTTPException(400, "Data non valida")
+
+    schedule = (db.query(WeeklySchedule)
+                .filter(WeeklySchedule.operator_id == op_id,
+                        WeeklySchedule.week_start == week_start)
+                .first())
+    if not schedule:
+        raise HTTPException(404, "Griglia non trovata")
+
+    entries_by_day = {}
+    for e in schedule.entries:
+        entries_by_day.setdefault(e.day_of_week, []).append(e)
+
+    buf = generate_schedule_excel(op, schedule, entries_by_day)
+    filename = f"GrigliaOraria_{op.surname}_{week_start_str}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(buf),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

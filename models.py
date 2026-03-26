@@ -30,6 +30,7 @@ class Operator(Base):
     comune_services = relationship("ComuneService", back_populates="operator", cascade="all, delete-orphan")
     contract_hours = relationship("ContractHours", back_populates="operator", uselist=False, cascade="all, delete-orphan")
     files = relationship("OperatorFile", back_populates="operator", cascade="all, delete-orphan")
+    weekly_schedules = relationship("WeeklySchedule", back_populates="operator", cascade="all, delete-orphan")
 
     @property
     def full_name(self):
@@ -120,3 +121,43 @@ class OperatorFile(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     operator = relationship("Operator", back_populates="files")
+
+
+class WeeklySchedule(Base):
+    """Griglia oraria settimanale dell'operatore."""
+    __tablename__ = "weekly_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    operator_id = Column(Integer, ForeignKey("operators.id"), nullable=False)
+    week_start = Column(Date, nullable=False)  # sempre lunedì della settimana
+    periodo_riferimento = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    operator = relationship("Operator", back_populates="weekly_schedules")
+    entries = relationship("WeeklyScheduleEntry", back_populates="schedule",
+                           cascade="all, delete-orphan",
+                           order_by="WeeklyScheduleEntry.day_of_week, WeeklyScheduleEntry.row_index")
+
+    __table_args__ = (
+        UniqueConstraint("operator_id", "week_start", name="uq_operator_week"),
+    )
+
+
+class WeeklyScheduleEntry(Base):
+    """Singola riga della griglia oraria."""
+    __tablename__ = "weekly_schedule_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("weekly_schedules.id"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 1=Lun, 2=Mar, ..., 6=Sab
+    row_index = Column(Integer, nullable=False, default=0)
+    ora_inizio = Column(String, default="")   # "08:30"
+    ora_fine = Column(String, default="")     # "13:00"
+    ore = Column(Float, default=0.0)          # calcolate automaticamente
+    utente_assistito = Column(String, default="")
+    servizio = Column(String, default="")
+    comune = Column(String, default="")
+
+    schedule = relationship("WeeklySchedule", back_populates="entries")

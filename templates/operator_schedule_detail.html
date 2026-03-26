@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Griglia {{ schedule.week_start.strftime('%d/%m/%Y') }} – {{ op.full_name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/operators">Operatori</a></li>
+    <li class="breadcrumb-item"><a href="/operators/{{ op.id }}">{{ op.full_name }}</a></li>
+    <li class="breadcrumb-item"><a href="/operators/{{ op.id }}/schedules">Griglie orarie</a></li>
+    <li class="breadcrumb-item active">{{ schedule.week_start.strftime('%d/%m/%Y') }}</li>
+  </ol>
+</nav>
+
+<!-- Header card -->
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header card-header-blue d-flex justify-content-between align-items-center">
+    <span>
+      <i class="bi bi-calendar-week me-2"></i>
+      Griglia oraria settimanale – {{ op.full_name }}
+    </span>
+    <a href="/operators/{{ op.id }}/schedules/{{ schedule.week_start }}/excel"
+       class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.5);">
+      <i class="bi bi-file-earmark-excel me-1"></i>Scarica Excel
+    </a>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-sm-6 col-md-4">
+        <span class="text-muted small fw-semibold d-block">NOME E COGNOME OPERATORE</span>
+        <span class="fw-bold">{{ op.full_name }}</span>
+      </div>
+      <div class="col-sm-6 col-md-4">
+        <span class="text-muted small fw-semibold d-block">SETTIMANA DAL</span>
+        <span class="fw-bold">{{ schedule.week_start.strftime('%d/%m/%Y') }}</span>
+      </div>
+      <div class="col-sm-6 col-md-4">
+        <span class="text-muted small fw-semibold d-block">PERIODO DI RIFERIMENTO</span>
+        <span class="fw-bold">{{ schedule.periodo_riferimento or "–" }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Griglia per giorno -->
+{% for dow in range(1, 7) %}
+{% set day_name = giorni_nomi[dow] %}
+{% set day_entries = entries_by_day.get(dow, []) %}
+{% set tot_giorno = totali_giorno.get(dow, 0) %}
+
+<div class="card shadow-sm border-0 mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center"
+       style="background-color:#0D3C7A; color:#fff;">
+    <span class="fw-bold">{{ day_name }}</span>
+    {% if tot_giorno > 0 %}
+    <span class="badge" style="background-color:#E65100;">
+      {{ "%.2f"|format(tot_giorno)|replace('.00','') }} h
+    </span>
+    {% endif %}
+  </div>
+
+  {% if day_entries %}
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0 align-middle">
+      <thead style="background-color:#1565C0; color:#fff;">
+        <tr>
+          <th class="text-center" style="width:100px;">ORA INIZIO</th>
+          <th class="text-center" style="width:100px;">ORA FINE</th>
+          <th class="text-center" style="width:70px;">ORE</th>
+          <th>UTENTE/ASSISTITO</th>
+          <th style="width:120px;">SERVIZIO</th>
+          <th style="width:120px;">COMUNE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in day_entries %}
+        <tr class="{{ 'table-light' if loop.index0 % 2 == 0 else '' }}">
+          <td class="text-center font-monospace small">{{ e.ora_inizio or "–" }}</td>
+          <td class="text-center font-monospace small">{{ e.ora_fine or "–" }}</td>
+          <td class="text-center fw-semibold">
+            {% if e.ore > 0 %}
+              {{ "%.2f"|format(e.ore)|replace('.00','') }}
+            {% else %}–{% endif %}
+          </td>
+          <td>{{ e.utente_assistito or "–" }}</td>
+          <td class="small">{{ e.servizio or "–" }}</td>
+          <td class="small">{{ e.comune or "–" }}</td>
+        </tr>
+        {% endfor %}
+        <!-- Totale giorno -->
+        <tr class="totale-row">
+          <td colspan="2" class="text-end fw-bold small text-muted">Totale {{ day_name }}:</td>
+          <td class="text-center fw-bold" style="color:#E65100;">
+            {{ "%.2f"|format(tot_giorno)|replace('.00','') }} h
+          </td>
+          <td colspan="3"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-center text-muted py-3 small">
+    <i class="bi bi-dash-circle me-1"></i>Nessuna attività registrata
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<!-- Totale settimana -->
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body complessivo-row d-flex justify-content-between align-items-center px-4 py-3">
+    <span class="fw-bold fs-5">
+      <i class="bi bi-sigma me-2"></i>TOTALE ORE SETTIMANA
+    </span>
+    <span class="fw-bold fs-4" style="color:#1565C0;">
+      {{ "%.2f"|format(totale_settimana)|replace('.00','') }} h
+    </span>
+  </div>
+</div>
+
+<!-- Azioni -->
+<div class="d-flex gap-2 mb-4">
+  <a href="/operators/{{ op.id }}/schedules" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Torna all'elenco
+  </a>
+  <a href="/operators/{{ op.id }}/schedules/{{ schedule.week_start }}/excel"
+     class="btn btn-success btn-sm">
+    <i class="bi bi-file-earmark-excel me-1"></i>Scarica Excel
+  </a>
+  <form action="/operators/{{ op.id }}/schedules/{{ schedule.week_start }}/delete"
+        method="post" class="d-inline"
+        onsubmit="return confirm('Eliminare questa griglia oraria?')">
+    <button type="submit" class="btn btn-outline-danger btn-sm">
+      <i class="bi bi-trash me-1"></i>Elimina
+    </button>
+  </form>
+</div>
+{% endblock %}

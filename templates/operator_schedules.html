@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Griglie orarie – {{ op.full_name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/operators">Operatori</a></li>
+    <li class="breadcrumb-item"><a href="/operators/{{ op.id }}">{{ op.full_name }}</a></li>
+    <li class="breadcrumb-item active">Griglie orarie</li>
+  </ol>
+</nav>
+
+<div class="d-flex align-items-center mb-3 gap-3">
+  <h4 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Griglie orarie settimanali – {{ op.full_name }}</h4>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-header card-header-blue d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-table me-2"></i>Griglie ({{ schedules|length }})</span>
+  </div>
+  <div class="card-body p-0">
+    {% if schedules %}
+    <table class="table table-hover table-sm mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Settimana dal</th>
+          <th>Periodo di riferimento</th>
+          <th class="text-center">N. righe</th>
+          <th>Aggiornato</th>
+          <th class="text-center">Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in schedules %}
+        <tr>
+          <td>
+            <i class="bi bi-calendar3 me-1 text-primary"></i>
+            <strong>{{ s.week_start.strftime('%d/%m/%Y') }}</strong>
+          </td>
+          <td class="text-muted small">{{ s.periodo_riferimento or "–" }}</td>
+          <td class="text-center">
+            <span class="badge bg-secondary">{{ s.entries|length }}</span>
+          </td>
+          <td class="small text-muted">
+            {% if s.updated_at %}{{ s.updated_at.strftime('%d/%m/%Y %H:%M') }}{% else %}–{% endif %}
+          </td>
+          <td class="text-center">
+            <a href="/operators/{{ op.id }}/schedules/{{ s.week_start }}"
+               class="btn btn-outline-primary btn-sm py-0 px-2 me-1" title="Visualizza">
+              <i class="bi bi-eye"></i>
+            </a>
+            <a href="/operators/{{ op.id }}/schedules/{{ s.week_start }}/excel"
+               class="btn btn-outline-success btn-sm py-0 px-2 me-1" title="Scarica Excel">
+              <i class="bi bi-file-earmark-excel"></i>
+            </a>
+            <form action="/operators/{{ op.id }}/schedules/{{ s.week_start }}/delete"
+                  method="post" class="d-inline"
+                  onsubmit="return confirm('Eliminare la griglia del {{ s.week_start.strftime(\'%d/%m/%Y\') }}?')">
+              <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2" title="Elimina">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>
+      Nessuna griglia oraria ancora sincronizzata.<br>
+      <small>L'operatore deve usare la funzione "Griglia oraria" nell'app mobile.</small>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
