@@ -17,8 +17,8 @@ from qrcode.image.pure import PyPNGImage
 from database import get_db, init_db
 from models import User, Operator, DayEntry, ComuneService, ContractHours, OperatorFile, WeeklySchedule, WeeklyScheduleEntry
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 from schemas import SyncPayload, SyncResponse, OperatorCreate, ContractHoursIn
 from auth import (
     verify_password, create_session_token, get_current_user,
