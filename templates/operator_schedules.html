@@ -55,7 +55,7 @@
             </a>
             <form action="/operators/{{ op.id }}/schedules/{{ s.week_start }}/delete"
                   method="post" class="d-inline"
-                  onsubmit="return confirm('Eliminare la griglia del {{ s.week_start.strftime(\'%d/%m/%Y\') }}?')">
+                  onsubmit="return confirm('Eliminare la griglia del {{ s.week_start.strftime('%d/%m/%Y') }}?')">
               <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2" title="Elimina">
                 <i class="bi bi-trash"></i>
               </button>
